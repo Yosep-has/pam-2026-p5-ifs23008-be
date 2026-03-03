@@ -3,8 +3,6 @@ package org.delcom.services
 import io.ktor.http.*
 import io.ktor.http.content.*
 import io.ktor.server.application.*
-import io.ktor.server.auth.*
-import io.ktor.server.auth.jwt.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.util.cio.*
@@ -13,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.delcom.data.AppException
 import org.delcom.data.DataResponse
+import org.delcom.data.PaginatedResponse
 import org.delcom.data.TodoRequest
 import org.delcom.helpers.ServiceHelper
 import org.delcom.helpers.ValidatorHelper
@@ -20,28 +19,69 @@ import org.delcom.repositories.ITodoRepository
 import org.delcom.repositories.IUserRepository
 import java.io.File
 import java.util.*
+import kotlin.math.ceil
 
 class TodoService(
     private val userRepo: IUserRepository,
     private val todoRepo: ITodoRepository
 ) {
-    // Mengambil semua daftar todo saya
-    suspend fun getAll(call: ApplicationCall) {
-        val user = ServiceHelper.getAuthUser(call, userRepo)
 
-        val search = call.request.queryParameters["search"] ?: ""
-
-        val todos = todoRepo.getAll(user.id, search)
+    // ── GET /todos/stats ─────────────────────────────────────────────────────
+    // Ringkasan todo untuk halaman Home: total, selesai, belum selesai
+    suspend fun getStats(call: ApplicationCall) {
+        val user  = ServiceHelper.getAuthUser(call, userRepo)
+        val stats = todoRepo.getStats(user.id)
 
         val response = DataResponse(
-            "success",
-            "Berhasil mengambil daftar todo saya",
-            mapOf(Pair("todos", todos))
+            status  = "success",
+            message = "Berhasil mengambil statistik todo",
+            data    = mapOf("stats" to stats)
         )
         call.respond(response)
     }
 
-    // Mengambil daftar todo saya dengan id
+    // ── GET /todos ────────────────────────────────────────────────────────────
+    // Query params:
+    //   ?search   – filter judul (opsional)
+    //   ?isDone   – "true" / "false" (opsional, kosong = semua)
+    //   ?page     – nomor halaman, default 1
+    //   ?perPage  – jumlah item per halaman, default 10
+    suspend fun getAll(call: ApplicationCall) {
+        val user = ServiceHelper.getAuthUser(call, userRepo)
+
+        val search  = call.request.queryParameters["search"]  ?: ""
+        val page    = call.request.queryParameters["page"]?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+        val perPage = call.request.queryParameters["perPage"]?.toIntOrNull()?.coerceIn(1, 100) ?: 10
+
+        // Parsing filter isDone: null = semua, true = selesai, false = belum selesai
+        val isDone: Boolean? = when (call.request.queryParameters["isDone"]?.lowercase()) {
+            "true"  -> true
+            "false" -> false
+            else    -> null
+        }
+
+        val total      = todoRepo.countAll(user.id, search, isDone)
+        val totalPages = ceil(total.toDouble() / perPage).toInt().coerceAtLeast(1)
+        val todos      = todoRepo.getAll(user.id, search, page, perPage, isDone)
+
+        val paginated = PaginatedResponse(
+            items       = todos,
+            page        = page,
+            perPage     = perPage,
+            total       = total,
+            totalPages  = totalPages,
+            hasNextPage = page < totalPages,
+        )
+
+        val response = DataResponse(
+            status  = "success",
+            message = "Berhasil mengambil daftar todo saya",
+            data    = mapOf("todos" to paginated)
+        )
+        call.respond(response)
+    }
+
+    // ── GET /todos/{id} ───────────────────────────────────────────────────────
     suspend fun getById(call: ApplicationCall) {
         val todoId = call.parameters["id"]
             ?: throw AppException(400, "Data todo tidak valid!")
@@ -54,28 +94,25 @@ class TodoService(
         }
 
         val response = DataResponse(
-            "success",
-            "Berhasil mengambil data todo",
-            mapOf(Pair("todo", todo))
+            status  = "success",
+            message = "Berhasil mengambil data todo",
+            data    = mapOf("todo" to todo)
         )
         call.respond(response)
     }
 
-    // Ubah cover todo
+    // ── PUT /todos/{id}/cover ─────────────────────────────────────────────────
     suspend fun putCover(call: ApplicationCall) {
         val todoId = call.parameters["id"]
             ?: throw AppException(400, "Data todo tidak valid!")
 
-        val user = ServiceHelper.getAuthUser(call, userRepo)
-
-        // Ambil data request
+        val user    = ServiceHelper.getAuthUser(call, userRepo)
         val request = TodoRequest()
         request.userId = user.id
 
         val multipartData = call.receiveMultipart(formFieldLimit = 1024 * 1024 * 5)
         multipartData.forEachPart { part ->
             when (part) {
-                // Upload file
                 is PartData.FileItem -> {
                     val ext = part.originalFileName
                         ?.substringAfterLast('.', "")
@@ -87,106 +124,76 @@ class TodoService(
 
                     withContext(Dispatchers.IO) {
                         val file = File(filePath)
-                        file.parentFile.mkdirs() // pastikan folder ada
-
+                        file.parentFile.mkdirs()
                         part.provider().copyAndClose(file.writeChannel())
                         request.cover = filePath
                     }
                 }
-
                 else -> {}
             }
-
             part.dispose()
         }
 
-        if (request.cover == null) {
-            throw AppException(404, "Cover todo tidak tersedia!")
-        }
+        if (request.cover == null) throw AppException(404, "Cover todo tidak tersedia!")
 
         val newFile = File(request.cover!!)
-        // Cek apakah gambar berhasil diunggah
-        if (!newFile.exists()) {
-            throw AppException(404, "Cover todo gagal diunggah!")
-        }
+        if (!newFile.exists()) throw AppException(404, "Cover todo gagal diunggah!")
 
         val oldTodo = todoRepo.getById(todoId)
         if (oldTodo == null || oldTodo.userId != user.id) {
             throw AppException(404, "Data todo tidak tersedia!")
         }
 
-        request.title = oldTodo.title
+        request.title       = oldTodo.title
         request.description = oldTodo.description
-        request.isDone = oldTodo.isDone
+        request.isDone      = oldTodo.isDone
 
-        val isUpdated = todoRepo.update(
-            user.id,
-            todoId,
-            request.toEntity()
-        )
-        if (!isUpdated) {
-            throw AppException(400, "Gagal memperbarui cover todo!")
-        }
+        val isUpdated = todoRepo.update(user.id, todoId, request.toEntity())
+        if (!isUpdated) throw AppException(400, "Gagal memperbarui cover todo!")
 
-        // Hapus cover todo lama
         if (oldTodo.cover != null) {
             val oldFile = File(oldTodo.cover!!)
-            if (oldFile.exists()) {
-                oldFile.delete()
-            }
+            if (oldFile.exists()) oldFile.delete()
         }
 
-        val response = DataResponse(
-            "success",
-            "Berhasil mengubah cover todo",
-            null
-        )
+        val response = DataResponse("success", "Berhasil mengubah cover todo", null)
         call.respond(response)
     }
 
-    // Menambahkan data todo
+    // ── POST /todos ───────────────────────────────────────────────────────────
     suspend fun post(call: ApplicationCall) {
-        val user = ServiceHelper.getAuthUser(call, userRepo)
-
-        // Ambil data request
+        val user    = ServiceHelper.getAuthUser(call, userRepo)
         val request = call.receive<TodoRequest>()
         request.userId = user.id
 
-        // Validasi request
         val validator = ValidatorHelper(request.toMap())
-        validator.required("title", "Judul todo tidak boleh kosong")
+        validator.required("title",       "Judul todo tidak boleh kosong")
         validator.required("description", "Deskripsi tidak boleh kosong")
         validator.validate()
 
-        // Tambahkan todo
-        val todoId = todoRepo.create(
-            request.toEntity()
-        )
+        val todoId = todoRepo.create(request.toEntity())
 
         val response = DataResponse(
-            "success",
-            "Berhasil menambahkan data todo",
-            mapOf(Pair("todoId", todoId))
+            status  = "success",
+            message = "Berhasil menambahkan data todo",
+            data    = mapOf("todoId" to todoId)
         )
         call.respond(response)
     }
 
-    // Mengubah data todo
+    // ── PUT /todos/{id} ───────────────────────────────────────────────────────
     suspend fun put(call: ApplicationCall) {
-        val todoId = call.parameters["id"]
+        val todoId  = call.parameters["id"]
             ?: throw AppException(400, "Data todo tidak valid!")
 
-        val user = ServiceHelper.getAuthUser(call, userRepo)
-
-        // Ambil data request
+        val user    = ServiceHelper.getAuthUser(call, userRepo)
         val request = call.receive<TodoRequest>()
         request.userId = user.id
 
-        // Validasi request
         val validator = ValidatorHelper(request.toMap())
-        validator.required("title", "Judul todo tidak boleh kosong")
+        validator.required("title",       "Judul todo tidak boleh kosong")
         validator.required("description", "Deskripsi tidak boleh kosong")
-        validator.required("isDone", "Status selesai tidak boleh kosong")
+        validator.required("isDone",      "Status selesai tidak boleh kosong")
         validator.validate()
 
         val oldTodo = todoRepo.getById(todoId)
@@ -195,24 +202,14 @@ class TodoService(
         }
         request.cover = oldTodo.cover
 
-        val isUpdated = todoRepo.update(
-            user.id,
-            todoId,
-            request.toEntity()
-        )
-        if (!isUpdated) {
-            throw AppException(400, "Gagal memperbarui data todo!")
-        }
+        val isUpdated = todoRepo.update(user.id, todoId, request.toEntity())
+        if (!isUpdated) throw AppException(400, "Gagal memperbarui data todo!")
 
-        val response = DataResponse(
-            "success",
-            "Berhasil mengubah data todo",
-            null
-        )
+        val response = DataResponse("success", "Berhasil mengubah data todo", null)
         call.respond(response)
     }
 
-    // Menghapus data todo
+    // ── DELETE /todos/{id} ────────────────────────────────────────────────────
     suspend fun delete(call: ApplicationCall) {
         val todoId = call.parameters["id"]
             ?: throw AppException(400, "Data todo tidak valid!")
@@ -225,28 +222,18 @@ class TodoService(
         }
 
         val isDeleted = todoRepo.delete(user.id, todoId)
-        if (!isDeleted) {
-            throw AppException(400, "Gagal menghapus data todo!")
-        }
+        if (!isDeleted) throw AppException(400, "Gagal menghapus data todo!")
 
         if (oldTodo.cover != null) {
             val oldFile = File(oldTodo.cover!!)
-
-            // Hapus data gambar jika data todo sudah dihapus
-            if (oldFile.exists()) {
-                oldFile.delete()
-            }
+            if (oldFile.exists()) oldFile.delete()
         }
 
-        val response = DataResponse(
-            "success",
-            "Berhasil menghapus data todo",
-            null
-        )
+        val response = DataResponse("success", "Berhasil menghapus data todo", null)
         call.respond(response)
     }
 
-    // Mengambil gambar todo
+    // ── GET /images/todos/{id} ────────────────────────────────────────────────
     suspend fun getCover(call: ApplicationCall) {
         val todoId = call.parameters["id"]
             ?: throw AppException(400, "Data todo tidak valid!")
@@ -254,14 +241,10 @@ class TodoService(
         val todo = todoRepo.getById(todoId)
             ?: return call.respond(HttpStatusCode.NotFound)
 
-        if (todo.cover == null) {
-            throw AppException(404, "Todo belum memiliki cover")
-        }
+        if (todo.cover == null) throw AppException(404, "Todo belum memiliki cover")
 
         val file = File(todo.cover!!)
-        if (!file.exists()) {
-            throw AppException(404, "Cover todo tidak tersedia")
-        }
+        if (!file.exists()) throw AppException(404, "Cover todo tidak tersedia")
 
         call.respondFile(file)
     }

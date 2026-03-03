@@ -21,28 +21,25 @@ fun Application.configureRouting() {
     val userService: UserService by inject()
 
     install(StatusPages) {
-        // Tangkap AppException
         exception<AppException> { call, cause ->
             val dataMap: Map<String, List<String>> = parseMessageToMap(cause.message)
-
             call.respond(
                 status = HttpStatusCode.fromValue(cause.code),
                 message = ErrorResponse(
-                    status = "fail",
+                    status  = "fail",
                     message = if (dataMap.isEmpty()) cause.message else "Data yang dikirimkan tidak valid!",
-                    data = if (dataMap.isEmpty()) null else dataMap.toString()
+                    data    = if (dataMap.isEmpty()) null else dataMap.toString()
                 )
             )
         }
 
-        // Tangkap semua Throwable lainnya
         exception<Throwable> { call, cause ->
             call.respond(
                 status = HttpStatusCode.fromValue(500),
                 message = ErrorResponse(
-                    status = "error",
+                    status  = "error",
                     message = cause.message ?: "Unknown error",
-                    data = ""
+                    data    = ""
                 )
             )
         }
@@ -53,72 +50,52 @@ fun Application.configureRouting() {
             call.respondText("API telah berjalan. Dibuat oleh Abdullah Ubaid.")
         }
 
-        // Route Auth
+        // ── Route Auth ────────────────────────────────────────────────────────
         route("/auth") {
-            post("/login") {
-                authService.postLogin(call)
-            }
-            post("/register") {
-                authService.postRegister(call)
-            }
-            post("/refresh-token") {
-                authService.postRefreshToken(call)
-            }
-
-            post("/logout") {
-                authService.postLogout(call)
-            }
+            post("/login")         { authService.postLogin(call) }
+            post("/register")      { authService.postRegister(call) }
+            post("/refresh-token") { authService.postRefreshToken(call) }
+            post("/logout")        { authService.postLogout(call) }
         }
 
         authenticate(JWTConstants.NAME) {
-            // Route User
+
+            // ── Route User ────────────────────────────────────────────────────
             route("/users") {
-                get("/me") {
-                    userService.getMe(call)
-                }
-                put("/me") {
-                    userService.putMe(call)
-                }
-                put("/me/password") {
-                    userService.putMyPassword(call)
-                }
-                put("/me/photo") {
-                    userService.putMyPhoto(call)
-                }
+                // Ambil profil saya
+                get("/me")              { userService.getMe(call) }
+
+                // Ubah informasi akun (name, username)
+                put("/me")              { userService.putMe(call) }
+
+                // Ubah kata sandi
+                put("/me/password")     { userService.putMyPassword(call) }
+
+                // Ubah foto profil (multipart/form-data, field: photo)
+                put("/me/photo")        { userService.putMyPhoto(call) }
             }
 
-            // Route Todos
+            // ── Route Todos ───────────────────────────────────────────────────
             route("/todos") {
-                get {
-                    todoService.getAll(call)
-                }
-                post {
-                    todoService.post(call)
-                }
-                get("/{id}") {
-                    todoService.getById(call)
-                }
-                put("/{id}") {
-                    todoService.put(call)
-                }
-                put("/{id}/cover") {
-                    todoService.putCover(call)
-                }
-                delete("/{id}") {
-                    todoService.delete(call)
-                }
+                // Statistik ringkasan todo (total, selesai, belum selesai) – untuk Home
+                get("/stats")           { todoService.getStats(call) }
+
+                // Daftar todo dengan pagination & filter
+                // Query: ?search= &isDone=true|false &page= &perPage=
+                get                     { todoService.getAll(call) }
+
+                post                    { todoService.post(call) }
+                get("/{id}")            { todoService.getById(call) }
+                put("/{id}")            { todoService.put(call) }
+                put("/{id}/cover")      { todoService.putCover(call) }
+                delete("/{id}")         { todoService.delete(call) }
             }
         }
 
+        // ── Route Images (publik) ─────────────────────────────────────────────
         route("/images") {
-            get("users/{id}") {
-                userService.getPhoto(call)
-            }
-
-            get("todos/{id}") {
-                todoService.getCover(call)
-            }
+            get("users/{id}")  { userService.getPhoto(call) }
+            get("todos/{id}")  { todoService.getCover(call) }
         }
-
     }
 }
