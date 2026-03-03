@@ -15,9 +15,7 @@ version = "0.0.1"
 application {
     mainClass = "org.delcom.ApplicationKt"
 }
-kotlin {
-    jvmToolchain(17)
-}
+
 
 dependencies {
     implementation("io.ktor:ktor-server-core-jvm")
