@@ -5,9 +5,8 @@ import io.ktor.http.content.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
+import io.ktor.util.cio.*
 import io.ktor.utils.io.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.delcom.data.AppException
 import org.delcom.data.AuthRequest
 import org.delcom.data.DataResponse
@@ -107,17 +106,7 @@ class UserService(
                     val file = File(filePath)
                     file.parentFile?.mkdirs()
 
-                    // Streaming langsung dengan buffer — tidak load seluruh file ke memory
-                    val channel = part.provider()
-                    withContext(Dispatchers.IO) {
-                        file.outputStream().buffered(DEFAULT_BUFFER_SIZE).use { output ->
-                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                            while (!channel.isClosedForRead) {
-                                val read = channel.readAvailable(buffer)
-                                if (read > 0) output.write(buffer, 0, read)
-                            }
-                        }
-                    }
+                    part.provider().copyAndClose(file.writeChannel())
                     newPhoto = filePath
                 }
 
@@ -145,7 +134,6 @@ class UserService(
             user
         )
         if (!isUpdated) {
-            // Hapus file baru jika update gagal
             newFile.delete()
             throw AppException(400, "Gagal memperbarui photo profile!")
         }
@@ -166,7 +154,7 @@ class UserService(
         call.respond(response)
     }
 
-    // Mengubah data saya
+    // Mengubah kata sandi
     suspend fun putMyPassword(call: ApplicationCall) {
         val user = ServiceHelper.getAuthUser(call, userRepo)
 
@@ -208,11 +196,11 @@ class UserService(
     // Mengambil photo
     suspend fun getPhoto(call: ApplicationCall) {
         val userId = call.parameters["id"]
-            ?: throw AppException(400, "Data todo tidak valid!")
+            ?: throw AppException(400, "Data user tidak valid!")
 
-        val user = userRepo.getById(userId) ?: throw AppException(400, "User not found!")
+        val user = userRepo.getById(userId) ?: throw AppException(404, "User tidak ditemukan!")
 
-        if(user.photo == null){
+        if (user.photo == null) {
             throw AppException(404, "User belum memiliki photo profile")
         }
 

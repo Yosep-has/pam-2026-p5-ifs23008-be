@@ -5,9 +5,8 @@ import io.ktor.http.content.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
+import io.ktor.util.cio.*
 import io.ktor.utils.io.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.delcom.data.AppException
 import org.delcom.data.DataResponse
 import org.delcom.data.PaginatedResponse
@@ -26,7 +25,6 @@ class TodoService(
 ) {
 
     // ── GET /todos/stats ─────────────────────────────────────────────────────
-    // Ringkasan todo untuk halaman Home: total, selesai, belum selesai
     suspend fun getStats(call: ApplicationCall) {
         val user  = ServiceHelper.getAuthUser(call, userRepo)
         val stats = todoRepo.getStats(user.id)
@@ -40,11 +38,6 @@ class TodoService(
     }
 
     // ── GET /todos ────────────────────────────────────────────────────────────
-    // Query params:
-    //   ?search   – filter judul (opsional)
-    //   ?isDone   – "true" / "false" (opsional, kosong = semua)
-    //   ?page     – nomor halaman, default 1
-    //   ?perPage  – jumlah item per halaman, default 10
     suspend fun getAll(call: ApplicationCall) {
         val user = ServiceHelper.getAuthUser(call, userRepo)
 
@@ -52,7 +45,6 @@ class TodoService(
         val page    = call.request.queryParameters["page"]?.toIntOrNull()?.coerceAtLeast(1) ?: 1
         val perPage = call.request.queryParameters["perPage"]?.toIntOrNull()?.coerceIn(1, 100) ?: 10
 
-        // Parsing filter isDone: null = semua, true = selesai, false = belum selesai
         val isDone: Boolean? = when (call.request.queryParameters["isDone"]?.lowercase()) {
             "true"  -> true
             "false" -> false
@@ -124,17 +116,7 @@ class TodoService(
                     val file = File(filePath)
                     file.parentFile?.mkdirs()
 
-                    // Streaming langsung dengan buffer — tidak load seluruh file ke memory
-                    val channel = part.provider()
-                    withContext(Dispatchers.IO) {
-                        file.outputStream().buffered(DEFAULT_BUFFER_SIZE).use { output ->
-                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                            while (!channel.isClosedForRead) {
-                                val read = channel.readAvailable(buffer)
-                                if (read > 0) output.write(buffer, 0, read)
-                            }
-                        }
-                    }
+                    part.provider().copyAndClose(file.writeChannel())
                     request.cover = filePath
                 }
                 else -> {}
