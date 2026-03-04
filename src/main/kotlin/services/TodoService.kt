@@ -5,8 +5,8 @@ import io.ktor.http.content.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
-import io.ktor.util.cio.*
 import io.ktor.utils.io.*
+import io.ktor.utils.io.jvm.javaio.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.delcom.data.AppException
@@ -122,12 +122,17 @@ class TodoService(
                     val fileName = UUID.randomUUID().toString() + ext
                     val filePath = "uploads/todos/$fileName"
 
+                    val file = File(filePath)
+                    file.parentFile?.mkdirs()
+
                     withContext(Dispatchers.IO) {
-                        val file = File(filePath)
-                        file.parentFile.mkdirs()
-                        part.provider().copyAndClose(file.writeChannel())
-                        request.cover = filePath
+                        part.provider().toInputStream().use { input ->
+                            file.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
                     }
+                    request.cover = filePath
                 }
                 else -> {}
             }
@@ -141,6 +146,7 @@ class TodoService(
 
         val oldTodo = todoRepo.getById(todoId)
         if (oldTodo == null || oldTodo.userId != user.id) {
+            newFile.delete()
             throw AppException(404, "Data todo tidak tersedia!")
         }
 
@@ -149,7 +155,10 @@ class TodoService(
         request.isDone      = oldTodo.isDone
 
         val isUpdated = todoRepo.update(user.id, todoId, request.toEntity())
-        if (!isUpdated) throw AppException(400, "Gagal memperbarui cover todo!")
+        if (!isUpdated) {
+            newFile.delete()
+            throw AppException(400, "Gagal memperbarui cover todo!")
+        }
 
         if (oldTodo.cover != null) {
             val oldFile = File(oldTodo.cover!!)

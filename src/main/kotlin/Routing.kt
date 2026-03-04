@@ -94,8 +94,8 @@ fun Application.configureRouting() {
 
         // ── Route Images (publik) ─────────────────────────────────────────────
         route("/images") {
-            get("users/{id}")  { userService.getPhoto(call) }
-            get("todos/{id}")  { todoService.getCover(call) }
+            get("/users/{id}")  { userService.getPhoto(call) }
+            get("/todos/{id}")  { todoService.getCover(call) }
         }
     }
 }

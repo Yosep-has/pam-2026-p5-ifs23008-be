@@ -5,8 +5,8 @@ import io.ktor.http.content.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
-import io.ktor.util.cio.*
 import io.ktor.utils.io.*
+import io.ktor.utils.io.jvm.javaio.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.delcom.data.AppException
@@ -38,6 +38,7 @@ class UserService(
                     id = user.id,
                     name = user.name,
                     username = user.username,
+                    photo = user.photo,
                     createdAt = user.createdAt,
                     updatedAt = user.updatedAt,
                 ),
@@ -104,13 +105,17 @@ class UserService(
                     val fileName = UUID.randomUUID().toString() + ext
                     val filePath = "uploads/users/$fileName"
 
-                    withContext(Dispatchers.IO) {
-                        val file = File(filePath)
-                        file.parentFile.mkdirs() // pastikan folder ada
+                    val file = File(filePath)
+                    file.parentFile?.mkdirs()
 
-                        part.provider().copyAndClose(file.writeChannel())
-                        newPhoto = filePath
+                    withContext(Dispatchers.IO) {
+                        part.provider().toInputStream().use { input ->
+                            file.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
                     }
+                    newPhoto = filePath
                 }
 
                 else -> {}
@@ -119,11 +124,11 @@ class UserService(
             part.dispose()
         }
 
-        if(newPhoto == null){
+        if (newPhoto == null) {
             throw AppException(404, "Photo profile tidak tersedia!")
         }
 
-        val newFile = File(newPhoto)
+        val newFile = File(newPhoto!!)
         // Cek apakah gambar berhasil diunggah
         if (!newFile.exists()) {
             throw AppException(404, "Photo profile gagal diunggah!")
@@ -137,13 +142,15 @@ class UserService(
             user
         )
         if (!isUpdated) {
+            // Hapus file baru jika update gagal
+            newFile.delete()
             throw AppException(400, "Gagal memperbarui photo profile!")
         }
 
         // Hapus photo profile lama
-        if(oldPhoto != null){
+        if (oldPhoto != null) {
             val oldFile = File(oldPhoto)
-            if(oldFile.exists()){
+            if (oldFile.exists()) {
                 oldFile.delete()
             }
         }

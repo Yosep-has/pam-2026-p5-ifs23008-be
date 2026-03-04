@@ -31,6 +31,7 @@ class UserRepository : IUserRepository {
             name = user.name
             username = user.username
             password = user.password
+            photo = user.photo
             createdAt = user.createdAt
             updatedAt = user.updatedAt
         }
