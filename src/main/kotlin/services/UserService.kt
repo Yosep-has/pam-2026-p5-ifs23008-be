@@ -6,7 +6,6 @@ import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.utils.io.*
-import io.ktor.utils.io.jvm.javaio.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.delcom.data.AppException
@@ -108,10 +107,14 @@ class UserService(
                     val file = File(filePath)
                     file.parentFile?.mkdirs()
 
+                    // Streaming langsung dengan buffer — tidak load seluruh file ke memory
+                    val channel = part.provider()
                     withContext(Dispatchers.IO) {
-                        part.provider().toInputStream().use { input ->
-                            file.outputStream().use { output ->
-                                input.copyTo(output)
+                        file.outputStream().buffered(DEFAULT_BUFFER_SIZE).use { output ->
+                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                            while (!channel.isClosedForRead) {
+                                val read = channel.readAvailable(buffer)
+                                if (read > 0) output.write(buffer, 0, read)
                             }
                         }
                     }
