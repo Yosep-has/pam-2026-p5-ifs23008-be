@@ -19,6 +19,7 @@ class TodoRepository : ITodoRepository {
         userId: String,
         search: String,
         isDone: Boolean?,
+        urgency: String?,
     ): Op<Boolean> {
         var condition: Op<Boolean> = TodoTable.userId eq UUID.fromString(userId)
 
@@ -31,6 +32,10 @@ class TodoRepository : ITodoRepository {
             condition = condition and (TodoTable.isDone eq isDone)
         }
 
+        if (!urgency.isNullOrBlank()) {
+            condition = condition and (TodoTable.urgency eq urgency)
+        }
+
         return condition
     }
 
@@ -40,9 +45,13 @@ class TodoRepository : ITodoRepository {
         page: Int,
         perPage: Int,
         isDone: Boolean?,
+        urgency: String?,
     ): List<Todo> = suspendTransaction {
-        val condition = buildCondition(userId, search, isDone)
+        val condition = buildCondition(userId, search, isDone, urgency)
         val offset = ((page - 1) * perPage).toLong()
+
+        // Urutkan: High → Medium → Low, lalu terbaru
+        val urgencyOrder = mapOf("High" to 0, "Medium" to 1, "Low" to 2)
 
         TodoDAO
             .find { condition }
@@ -50,14 +59,16 @@ class TodoRepository : ITodoRepository {
             .limit(perPage)
             .offset(offset)
             .map(::todoDAOToModel)
+            .sortedWith(compareBy { urgencyOrder[it.urgency] ?: 3 })
     }
 
     override suspend fun countAll(
         userId: String,
         search: String,
         isDone: Boolean?,
+        urgency: String?,
     ): Long = suspendTransaction {
-        val condition = buildCondition(userId, search, isDone)
+        val condition = buildCondition(userId, search, isDone, urgency)
         TodoDAO.find { condition }.count()
     }
 
@@ -89,6 +100,7 @@ class TodoRepository : ITodoRepository {
             description = todo.description
             cover       = todo.cover
             isDone      = todo.isDone
+            urgency     = todo.urgency
             createdAt   = todo.createdAt
             updatedAt   = todo.updatedAt
         }
@@ -109,6 +121,7 @@ class TodoRepository : ITodoRepository {
             todoDAO.description = newTodo.description
             todoDAO.cover       = newTodo.cover
             todoDAO.isDone      = newTodo.isDone
+            todoDAO.urgency     = newTodo.urgency
             todoDAO.updatedAt   = newTodo.updatedAt
             true
         } else {

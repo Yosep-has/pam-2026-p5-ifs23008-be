@@ -13,6 +13,7 @@ data class User(
     var username: String,
     var password: String,
     var photo: String? = null,
+    var about: String? = null,    // Tentang / bio singkat
 
     @Contextual
     val createdAt: Instant = Clock.System.now(),

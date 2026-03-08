@@ -37,6 +37,7 @@ class UserService(
                     name = user.name,
                     username = user.username,
                     photo = user.photo,
+                    about = user.about,
                     createdAt = user.createdAt,
                     updatedAt = user.updatedAt,
                 ),
@@ -69,6 +70,7 @@ class UserService(
 
         user.username = request.username
         user.name = request.name
+        user.about = request.about   // simpan bio/tentang
         val isUpdated = userRepo.update(
             user.id,
             user
