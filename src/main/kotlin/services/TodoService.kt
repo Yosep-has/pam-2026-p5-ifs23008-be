@@ -51,13 +51,9 @@ class TodoService(
             else    -> null
         }
 
-        // Filter urgency: Low | Medium | High (null = semua)
-        val urgency: String? = call.request.queryParameters["urgency"]
-            ?.let { it.ifBlank { null } }
-
-        val total      = todoRepo.countAll(user.id, search, isDone, urgency)
+        val total      = todoRepo.countAll(user.id, search, isDone)
         val totalPages = ceil(total.toDouble() / perPage).toInt().coerceAtLeast(1)
-        val todos      = todoRepo.getAll(user.id, search, page, perPage, isDone, urgency)
+        val todos      = todoRepo.getAll(user.id, search, page, perPage, isDone)
 
         val paginated = PaginatedResponse(
             items       = todos,
@@ -142,7 +138,6 @@ class TodoService(
         request.title       = oldTodo.title
         request.description = oldTodo.description
         request.isDone      = oldTodo.isDone
-        request.urgency     = oldTodo.urgency
 
         val isUpdated = todoRepo.update(user.id, todoId, request.toEntity())
         if (!isUpdated) {
@@ -170,11 +165,6 @@ class TodoService(
         validator.required("description", "Deskripsi tidak boleh kosong")
         validator.validate()
 
-        // Validasi urgency — default ke "Low" jika tidak valid
-        if (request.urgency !in listOf("Low", "Medium", "High")) {
-            request.urgency = "Low"
-        }
-
         val todoId = todoRepo.create(request.toEntity())
 
         val response = DataResponse(
@@ -199,11 +189,6 @@ class TodoService(
         validator.required("description", "Deskripsi tidak boleh kosong")
         validator.required("isDone",      "Status selesai tidak boleh kosong")
         validator.validate()
-
-        // Validasi urgency
-        if (request.urgency !in listOf("Low", "Medium", "High")) {
-            request.urgency = "Low"
-        }
 
         val oldTodo = todoRepo.getById(todoId)
         if (oldTodo == null || oldTodo.userId != user.id) {

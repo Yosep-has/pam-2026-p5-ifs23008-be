@@ -11,6 +11,7 @@ interface ITodoRepository {
         page: Int,
         perPage: Int,
         isDone: Boolean?,
+        urgency: String?,
     ): List<Todo>
 
     // Hitung total todo berdasarkan filter (untuk pagination)
@@ -18,6 +19,7 @@ interface ITodoRepository {
         userId: String,
         search: String,
         isDone: Boolean?,
+        urgency: String?,
     ): Long
 
     // Statistik ringkasan todo untuk halaman home

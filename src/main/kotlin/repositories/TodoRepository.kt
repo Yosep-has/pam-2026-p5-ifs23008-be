@@ -66,7 +66,7 @@ class TodoRepository : ITodoRepository {
         userId: String,
         search: String,
         isDone: Boolean?,
-        urgency: String?,
+        urgency: String?
     ): Long = suspendTransaction {
         val condition = buildCondition(userId, search, isDone, urgency)
         TodoDAO.find { condition }.count()
