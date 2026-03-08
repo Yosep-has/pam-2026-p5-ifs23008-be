@@ -41,33 +41,35 @@ class TodoService(
     suspend fun getAll(call: ApplicationCall) {
         val user = ServiceHelper.getAuthUser(call, userRepo)
 
-        val search  = call.request.queryParameters["search"]  ?: ""
-        val page    = call.request.queryParameters["page"]?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+        val search = call.request.queryParameters["search"] ?: ""
+        val page = call.request.queryParameters["page"]?.toIntOrNull()?.coerceAtLeast(1) ?: 1
         val perPage = call.request.queryParameters["perPage"]?.toIntOrNull()?.coerceIn(1, 100) ?: 10
 
         val isDone: Boolean? = when (call.request.queryParameters["isDone"]?.lowercase()) {
-            "true"  -> true
+            "true" -> true
             "false" -> false
-            else    -> null
+            else -> null
         }
 
-        val total      = todoRepo.countAll(user.id, search, isDone)
+        val urgency: Int? = call.request.queryParameters["urgency"]?.toIntOrNull()
+
+        val total = todoRepo.countAll(user.id, search, isDone, urgency)
         val totalPages = ceil(total.toDouble() / perPage).toInt().coerceAtLeast(1)
-        val todos      = todoRepo.getAll(user.id, search, page, perPage, isDone)
+        val todos = todoRepo.getAll(user.id, search, page, perPage, isDone, urgency)
 
         val paginated = PaginatedResponse(
-            items       = todos,
-            page        = page,
-            perPage     = perPage,
-            total       = total,
-            totalPages  = totalPages,
+            items = todos,
+            page = page,
+            perPage = perPage,
+            total = total,
+            totalPages = totalPages,
             hasNextPage = page < totalPages,
         )
 
         val response = DataResponse(
-            status  = "success",
+            status = "success",
             message = "Berhasil mengambil daftar todo saya",
-            data    = mapOf("todos" to paginated)
+            data = mapOf("todos" to paginated)
         )
         call.respond(response)
     }
@@ -156,39 +158,47 @@ class TodoService(
 
     // ── POST /todos ───────────────────────────────────────────────────────────
     suspend fun post(call: ApplicationCall) {
-        val user    = ServiceHelper.getAuthUser(call, userRepo)
+        val user = ServiceHelper.getAuthUser(call, userRepo)
         val request = call.receive<TodoRequest>()
         request.userId = user.id
 
         val validator = ValidatorHelper(request.toMap())
-        validator.required("title",       "Judul todo tidak boleh kosong")
+        validator.required("title", "Judul todo tidak boleh kosong")
         validator.required("description", "Deskripsi tidak boleh kosong")
         validator.validate()
+
+        if (request.urgency !in 1..3) {
+            request.urgency = 1
+        }
 
         val todoId = todoRepo.create(request.toEntity())
 
         val response = DataResponse(
-            status  = "success",
+            status = "success",
             message = "Berhasil menambahkan data todo",
-            data    = mapOf("todoId" to todoId)
+            data = mapOf("todoId" to todoId)
         )
         call.respond(response)
     }
 
     // ── PUT /todos/{id} ───────────────────────────────────────────────────────
     suspend fun put(call: ApplicationCall) {
-        val todoId  = call.parameters["id"]
+        val todoId = call.parameters["id"]
             ?: throw AppException(400, "Data todo tidak valid!")
 
-        val user    = ServiceHelper.getAuthUser(call, userRepo)
+        val user = ServiceHelper.getAuthUser(call, userRepo)
         val request = call.receive<TodoRequest>()
         request.userId = user.id
 
         val validator = ValidatorHelper(request.toMap())
-        validator.required("title",       "Judul todo tidak boleh kosong")
+        validator.required("title", "Judul todo tidak boleh kosong")
         validator.required("description", "Deskripsi tidak boleh kosong")
-        validator.required("isDone",      "Status selesai tidak boleh kosong")
+        validator.required("isDone", "Status selesai tidak boleh kosong")
         validator.validate()
+
+        if (request.urgency !in 1..3) {
+            request.urgency = 1
+        }
 
         val oldTodo = todoRepo.getById(todoId)
         if (oldTodo == null || oldTodo.userId != user.id) {

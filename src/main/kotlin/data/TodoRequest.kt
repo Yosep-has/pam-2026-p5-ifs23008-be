@@ -3,7 +3,6 @@ package org.delcom.data
 import kotlinx.datetime.Clock
 import kotlinx.serialization.Serializable
 import org.delcom.entities.Todo
-import java.util.UUID
 
 @Serializable
 data class TodoRequest(
@@ -12,8 +11,8 @@ data class TodoRequest(
     var description: String = "",
     var cover: String? = null,
     var isDone: Boolean = false,
-    var urgency: String = "Low",   // Low | Medium | High
-){
+    var urgency: Int = 1,
+) {
     fun toMap(): Map<String, Any?> {
         return mapOf(
             "userId" to userId,
@@ -36,5 +35,4 @@ data class TodoRequest(
             updatedAt = Clock.System.now()
         )
     }
-
 }
