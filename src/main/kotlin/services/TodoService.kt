@@ -103,16 +103,23 @@ class TodoService(
         val request = TodoRequest()
         request.userId = user.id
 
+        val allowedImageExtensions = setOf("jpg", "jpeg", "png", "webp", "gif")
+
         val multipartData = call.receiveMultipart(formFieldLimit = 1024 * 1024 * 5)
         multipartData.forEachPart { part ->
             when (part) {
                 is PartData.FileItem -> {
-                    val ext = part.originalFileName
+                    val rawExt = part.originalFileName
                         ?.substringAfterLast('.', "")
-                        ?.let { if (it.isNotEmpty()) ".$it" else "" }
+                        ?.lowercase()
                         ?: ""
 
-                    val fileName = UUID.randomUUID().toString() + ext
+                    if (rawExt !in allowedImageExtensions) {
+                        part.dispose()
+                        throw AppException(400, "Format file tidak didukung! Gunakan: jpg, jpeg, png, webp, atau gif")
+                    }
+
+                    val fileName = UUID.randomUUID().toString() + ".$rawExt"
                     val filePath = "uploads/todos/$fileName"
 
                     val file = File(filePath)
@@ -126,7 +133,7 @@ class TodoService(
             part.dispose()
         }
 
-        if (request.cover == null) throw AppException(404, "Cover todo tidak tersedia!")
+        if (request.cover == null) throw AppException(400, "Cover todo tidak tersedia!")
 
         val newFile = File(request.cover!!)
         if (!newFile.exists()) throw AppException(404, "Cover todo gagal diunggah!")
@@ -193,7 +200,7 @@ class TodoService(
         val validator = ValidatorHelper(request.toMap())
         validator.required("title", "Judul todo tidak boleh kosong")
         validator.required("description", "Deskripsi tidak boleh kosong")
-        validator.required("isDone", "Status selesai tidak boleh kosong")
+        // isDone adalah Boolean, tidak perlu validator.required (false pun valid)
         validator.validate()
 
         if (request.urgency !in 1..3) {
@@ -238,16 +245,21 @@ class TodoService(
     }
 
     // ── GET /images/todos/{id} ────────────────────────────────────────────────
+    // Catatan: endpoint ini publik (tanpa auth) agar cover bisa ditampilkan langsung di browser/app
     suspend fun getCover(call: ApplicationCall) {
         val todoId = call.parameters["id"]
             ?: throw AppException(400, "Data todo tidak valid!")
 
         val todo = todoRepo.getById(todoId)
-            ?: return call.respond(HttpStatusCode.NotFound)
+            ?: throw AppException(404, "Data todo tidak tersedia!")
 
         if (todo.cover == null) throw AppException(404, "Todo belum memiliki cover")
 
-        val file = File(todo.cover!!)
+        val file = File(todo.cover!!).canonicalFile
+        // Pastikan file berada di dalam direktori uploads (cegah path traversal)
+        if (!file.path.startsWith(File("uploads").canonicalPath)) {
+            throw AppException(400, "Akses file tidak diizinkan!")
+        }
         if (!file.exists()) throw AppException(404, "Cover todo tidak tersedia")
 
         call.respondFile(file)

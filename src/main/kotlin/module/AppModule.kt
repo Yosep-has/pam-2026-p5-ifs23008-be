@@ -27,12 +27,12 @@ fun appModule(jwtSecret: String) = module {
         AuthService(jwtSecret,get(), get())
     }
 
-    // Plant Repository
+    // Todo Repository
     single<ITodoRepository> {
         TodoRepository()
     }
 
-    // Plant Service
+    // Todo Service
     single {
         TodoService(get(),get())
     }

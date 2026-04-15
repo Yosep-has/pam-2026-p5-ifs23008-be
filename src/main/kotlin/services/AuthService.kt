@@ -124,12 +124,13 @@ class AuthService(
             authToken = request.authToken
         )
 
-        // Hapus token lama
-        refreshTokenRepository.delete(request.authToken)
-
+        // Validasi dulu, baru hapus token lama
         if(existRefreshToken == null) {
             throw AppException(401, "Token tidak valid!")
         }
+
+        // Hapus token lama setelah dipastikan valid
+        refreshTokenRepository.delete(request.authToken)
 
         // periksa user
         val userId = existRefreshToken.userId
@@ -175,9 +176,13 @@ class AuthService(
         validator.required("authToken", "Auth Token tidak boleh kosong")
         validator.validate()
 
-        val decodedJWT = JWT.require(Algorithm.HMAC256(jwtSecret))
-            .build()
-            .verify(request.authToken)
+        val decodedJWT = try {
+            JWT.require(Algorithm.HMAC256(jwtSecret))
+                .build()
+                .verify(request.authToken)
+        } catch (e: Exception) {
+            throw AppException(401, "Token tidak valid atau sudah kadaluarsa")
+        }
 
         val userId = decodedJWT
             .getClaim("userId")

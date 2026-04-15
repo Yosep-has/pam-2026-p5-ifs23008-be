@@ -92,17 +92,23 @@ class UserService(
         val user = ServiceHelper.getAuthUser(call, userRepo)
 
         var newPhoto: String? = null
+        val allowedImageExtensions = setOf("jpg", "jpeg", "png", "webp", "gif")
         val multipartData = call.receiveMultipart(formFieldLimit = 1024 * 1024 * 5)
         multipartData.forEachPart { part ->
             when (part) {
                 // Upload file
                 is PartData.FileItem -> {
-                    val ext = part.originalFileName
+                    val rawExt = part.originalFileName
                         ?.substringAfterLast('.', "")
-                        ?.let { if (it.isNotEmpty()) ".$it" else "" }
+                        ?.lowercase()
                         ?: ""
 
-                    val fileName = UUID.randomUUID().toString() + ext
+                    if (rawExt !in allowedImageExtensions) {
+                        part.dispose()
+                        throw AppException(400, "Format file tidak didukung! Gunakan: jpg, jpeg, png, webp, atau gif")
+                    }
+
+                    val fileName = UUID.randomUUID().toString() + ".$rawExt"
                     val filePath = "uploads/users/$fileName"
 
                     val file = File(filePath)
@@ -171,7 +177,7 @@ class UserService(
 
         val validPassword = verifyPassword(request.password, user.password)
         if (!validPassword) {
-            throw AppException(404, "Kata sandi lama tidak valid!")
+            throw AppException(401, "Kata sandi lama tidak valid!")
         }
 
         // buat password baru
@@ -206,7 +212,11 @@ class UserService(
             throw AppException(404, "User belum memiliki photo profile")
         }
 
-        val file = File(user.photo!!)
+        val file = File(user.photo!!).canonicalFile
+        // Pastikan file berada di dalam direktori uploads (cegah path traversal)
+        if (!file.path.startsWith(File("uploads").canonicalPath)) {
+            throw AppException(400, "Akses file tidak diizinkan!")
+        }
         if (!file.exists()) {
             throw AppException(404, "Photo profile tidak tersedia")
         }
